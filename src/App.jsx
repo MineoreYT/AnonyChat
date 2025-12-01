@@ -2,8 +2,11 @@
 import { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 
-const SOCKET_URL = "https://anonymous-chat-server.onrender.com"; // change in prod
-const socket = io(SOCKET_URL, { autoConnect: false });
+const socket = io("https://anonymous-chat-server.onrender.com", {
+  path: "/socket.io",
+  autoConnect: false,
+});
+
 
 function generateAnonID() {
   return "anon-" + Math.random().toString(36).substring(2, 12);
