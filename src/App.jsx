@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 
-const SOCKET_URL = "https://anonymous-chat-server.onrender.com";
+const SOCKET_URL = "https://anonymous-chat-server-1q5h.onrender.com";
 const socket = io(SOCKET_URL, {
   path: "/socket.io",
   autoConnect: false,
