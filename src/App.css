@@ -1,0 +1,138 @@
+/* General dark mode */
+body, html, #root {
+  height: 100%;
+  margin: 0;
+  font-family: sans-serif;
+  background-color: #121212;
+  color: #fff;
+}
+
+/* Layout */
+.app-container {
+  display: flex;
+  height: 100vh;
+}
+
+/* Sidebar */
+.sidebar {
+  width: 250px;
+  background: #1f1f1f;
+  color: #fff;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #333;
+}
+
+.sidebar h3, .sidebar h4 {
+  margin: 0 0 8px 0;
+}
+
+.user-id {
+  word-break: break-all;
+  margin-bottom: 12px;
+  font-size: 14px;
+}
+
+.online-users {
+  flex: 1;
+  overflow-y: auto;
+  margin-bottom: 12px;
+}
+
+.online-user {
+  padding: 10px;
+  margin-bottom: 6px;
+  border-radius: 12px;
+  cursor: pointer;
+  background: #2c2c2c;
+  color: #ccc;
+  transition: background 0.2s, color 0.2s;
+}
+
+.online-user.selected {
+  background: #4a90e2;
+  color: #fff;
+}
+
+.sidebar button {
+  padding: 10px 16px;
+  border-radius: 20px;
+  border: none;
+  cursor: pointer;
+  margin-right: 8px;
+  margin-top: 4px;
+}
+
+.call-green { background: #28a745; color: #fff; }
+.call-red { background: #dc3545; color: #fff; }
+.call-blue { background: #4a90e2; color: #fff; }
+
+/* Chat area */
+.chat-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+}
+
+.messages-container {
+  flex: 1;
+  overflow-y: auto;
+  margin-bottom: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.message-bubble {
+  padding: 10px 14px;
+  border-radius: 20px;
+  max-width: 70%;
+  word-break: break-word;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+}
+
+.message-bubble.own {
+  align-self: flex-end;
+  background: #4a90e2;
+  box-shadow: 0 2px 8px rgba(74,144,226,0.5);
+}
+
+.message-bubble.other {
+  align-self: flex-start;
+  background: #2c2c2c;
+}
+
+/* Input */
+.chat-input-container {
+  display: flex;
+  gap: 8px;
+}
+
+.chat-input-container input {
+  padding: 10px;
+  border-radius: 20px;
+  border: none;
+  flex: 1;
+  outline: none;
+  background: #2c2c2c;
+  color: #fff;
+}
+
+/* Incoming call modal */
+.incoming-call-modal {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  background: #1f1f1f;
+  border: 1px solid #444;
+  padding: 16px;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  color: #fff;
+}
+.incoming-call-modal button {
+  margin-right: 8px;
+}
