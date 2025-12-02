@@ -5,7 +5,6 @@ import { io } from "socket.io-client";
 const SOCKET_URL = "https://anonymous-chat-server-1q5h.onrender.com";
 const socket = io(SOCKET_URL, { path: "/socket.io", autoConnect: false });
 
-/* ---------------- RANDOM NAME GENERATOR ---------------- */
 function generateRandomName() {
   const adjectives = ["Swift","Silent","Brave","Lucky","Clever","Mighty","Happy","Cosmic","Frosty","Shadow"];
   const animals = ["Tiger","Falcon","Wolf","Panda","Eagle","Lion","Otter","Hawk","Bear","Dragon"];
@@ -14,7 +13,6 @@ function generateRandomName() {
   return `${adj}${animal}-${Math.floor(Math.random() * 9999)}`;
 }
 
-/* ---------------- AVATAR HELPERS ---------------- */
 function getAvatarLetter(id) { return id?.charAt(0)?.toUpperCase() || "?"; }
 function getAvatarColor(id) {
   const colors = ["#4a90e2","#50e3c2","#f5a623","#d0021b","#9013fe","#7ed321"];
@@ -23,15 +21,14 @@ function getAvatarColor(id) {
   return colors[sum % colors.length];
 }
 
-/* ---------------- APP ---------------- */
 export default function App() {
   const [userID, setUserID] = useState("");
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [selectedUser, setSelectedUser] = useState(null);
   const [privateMessages, setPrivateMessages] = useState({});
   const [text, setText] = useState("");
+  const [unreadCounts, setUnreadCounts] = useState({}); // For notification badges
 
-  /* ---------------- INIT ---------------- */
   useEffect(() => {
     let storedID = sessionStorage.getItem("anon_id");
     if (!storedID) {
@@ -39,6 +36,9 @@ export default function App() {
       sessionStorage.setItem("anon_id", storedID);
     }
     setUserID(storedID);
+
+    // Request permission for browser notifications
+    if (Notification.permission !== "granted") Notification.requestPermission();
 
     socket.auth = { userID: storedID };
     socket.connect();
@@ -50,15 +50,23 @@ export default function App() {
         const arr = prev[data.from] || [];
         return { ...prev, [data.from]: [...arr, data] };
       });
+
+      // Update unread badge if user not selected
+      if (data.from !== selectedUser) {
+        setUnreadCounts(prev => ({ ...prev, [data.from]: (prev[data.from] || 0) + 1 }));
+        // Browser notification
+        if (Notification.permission === "granted") {
+          new Notification(`New message from ${data.from}`, { body: data.text });
+        }
+      }
     });
 
     return () => {
       socket.off("online_users");
       socket.off("receive_private");
     };
-  }, []);
+  }, [selectedUser]);
 
-  /* ---------------- PRIVATE MESSAGE ---------------- */
   const sendPrivateMessage = () => {
     if (!selectedUser || !text.trim()) return;
     const msg = { to: selectedUser, from: userID, text, time: new Date().toLocaleTimeString() };
@@ -70,9 +78,13 @@ export default function App() {
     setText("");
   };
 
+  const selectUser = (user) => {
+    setSelectedUser(user);
+    setUnreadCounts(prev => ({ ...prev, [user]: 0 })); // Clear unread count when opening chat
+  };
+
   const shareLink = `${window.location.origin}/?chatWith=${userID}`;
 
-  /* ---------------- UI ---------------- */
   return (
     <div style={{ display: "flex", height: "100vh", backgroundColor: "#121212", color: "#fff", fontFamily: "sans-serif" }}>
       {/* SIDEBAR */}
@@ -83,19 +95,24 @@ export default function App() {
         <h4>Online</h4>
         <div style={{ flex: 1, overflowY: "auto", marginBottom: 12 }}>
           {onlineUsers.map(u => (
-            <div key={u} onClick={() => setSelectedUser(u)} style={{
+            <div key={u} onClick={() => selectUser(u)} style={{
               padding: 10, marginBottom: 6, borderRadius: 12, cursor: "pointer",
-              display: "flex", alignItems: "center", gap: 10,
+              display: "flex", alignItems: "center", justifyContent: "space-between",
               background: selectedUser === u ? "#4a90e2" : "#2c2c2c",
               color: selectedUser === u ? "#fff" : "#ccc",
               transition: "0.2s"
             }}>
-              <div style={{
-                width: 32, height: 32, borderRadius: "50%", backgroundColor: getAvatarColor(u),
-                display: "flex", alignItems: "center", justifyContent: "center",
-                fontWeight: "bold", fontSize: 16, color: "#fff"
-              }}>{getAvatarLetter(u)}</div>
-              {u}
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{
+                  width: 32, height: 32, borderRadius: "50%", backgroundColor: getAvatarColor(u),
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontWeight: "bold", fontSize: 16, color: "#fff"
+                }}>{getAvatarLetter(u)}</div>
+                {u}
+              </div>
+              {unreadCounts[u] > 0 && (
+                <div style={{ background: "#dc3545", borderRadius: "50%", padding: "4px 8px", fontSize: 12 }}>{unreadCounts[u]}</div>
+              )}
             </div>
           ))}
         </div>
