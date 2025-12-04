@@ -2,14 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { io } from "socket.io-client";
 
 const SOCKET_URL = import.meta.env.VITE_SERVER_URL || "https://anonymous-chat-server-1q5h.onrender.com";
-
-function generateRandomName() {
-  const adjectives = ["Swift","Silent","Brave","Lucky","Clever","Mighty","Happy","Cosmic","Frosty","Shadow"];
-  const animals = ["Tiger","Falcon","Wolf","Panda","Eagle","Lion","Otter","Hawk","Bear","Dragon"];
-  return adjectives[Math.floor(Math.random() * adjectives.length)] +
-         animals[Math.floor(Math.random() * animals.length)] + "-" +
-         Math.floor(Math.random() * 9999);
-}
+const socket = io(SOCKET_URL, { path: "/socket.io", autoConnect: false });
 
 function avatarColor(id) {
   const colors = ["#4a90e2","#50e3c2","#f5a623","#d0021b","#9013fe","#7ed321"];
@@ -19,26 +12,8 @@ function avatarColor(id) {
 
 function avatarLetter(id) { return id?.charAt(0)?.toUpperCase() || "?"; }
 
-// Browser fingerprinting function
-function getBrowserFingerprint() {
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  ctx.textBaseline = 'top';
-  ctx.font = '14px Arial';
-  ctx.fillText('fingerprint', 2, 2);
-  
-  return {
-    userAgent: navigator.userAgent,
-    language: navigator.language,
-    platform: navigator.platform,
-    screenResolution: `${screen.width}x${screen.height}`,
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    canvas: canvas.toDataURL()
-  };
-}
-
 export default function App() {
-  const [username, setUsername] = useState(generateRandomName() + " (pending...)");
+  const [username, setUsername] = useState("Connecting...");
   const [userID, setUserID] = useState(null);
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [selectedUser, setSelectedUser] = useState(null);
@@ -47,7 +22,6 @@ export default function App() {
   const [unreadCounts, setUnreadCounts] = useState({});
   const [text, setText] = useState("");
   const chatEndRef = useRef(null);
-  const socketRef = useRef(null);
 
   const scrollToBottom = () => {
     setTimeout(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, 100);
@@ -55,17 +29,7 @@ export default function App() {
 
   // Initial setup & socket connection
   useEffect(() => {
-    // Generate browser fingerprint
-    const fingerprint = getBrowserFingerprint();
-    
-    // Initialize socket with fingerprint
-    socketRef.current = io(SOCKET_URL, { 
-      path: "/socket.io", 
-      auth: { fingerprint },
-      autoConnect: false 
-    });
-    
-    const socket = socketRef.current;
+    // Connect without sending username - server will assign it
     socket.connect();
 
     // Listen for server-assigned username
@@ -75,7 +39,8 @@ export default function App() {
     });
 
     socket.on("online_users", users => {
-      setOnlineUsers(users);
+      // Filter out current user from the list
+      setOnlineUsers(users.filter(u => u !== username));
     });
 
     socket.on("receive_private", data => {
@@ -112,7 +77,6 @@ export default function App() {
       socket.off("receive_private");
       socket.off("live_message");
       socket.off("warning");
-      socket.disconnect();
     };
   }, [selectedUser, username]);
 
@@ -125,21 +89,22 @@ export default function App() {
   }, []);
 
   const sendPrivateMessage = () => {
-    if (!text.trim() || !selectedUser || !socketRef.current) return;
+    if (!text.trim() || !selectedUser) return;
     const msg = { 
       toName: selectedUser, 
       text, 
       time: new Date().toLocaleTimeString() 
     };
-    socketRef.current.emit("private_message", msg);
+    socket.emit("private_message", msg);
+    // Don't add to local state - wait for server to send it back
     setText(""); 
     scrollToBottom();
   };
 
   const sendLive = () => {
-    if (!text.trim() || !socketRef.current) return;
+    if (!text.trim()) return;
     const msg = { text, time: new Date().toLocaleTimeString() };
-    socketRef.current.emit("live_message", msg); 
+    socket.emit("live_message", msg); 
     setText(""); 
     scrollToBottom();
   };
