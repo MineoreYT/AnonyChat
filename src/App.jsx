@@ -21,7 +21,7 @@ function avatarColor(id) {
 function avatarLetter(id) { return id?.charAt(0)?.toUpperCase() || "?"; }
 
 export default function App() {
-  const [userID, setUserID] = useState("");
+  const [username, setUsername] = useState("");
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [selectedUser, setSelectedUser] = useState(null);
   const [privateMessages, setPrivateMessages] = useState({});
@@ -34,48 +34,50 @@ export default function App() {
     setTimeout(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, 100);
   };
 
+  // Initial setup & socket connection
   useEffect(() => {
-    let storedID = sessionStorage.getItem("anon_id") || generateRandomName();
-    sessionStorage.setItem("anon_id", storedID);
-    setUserID(storedID);
+    let storedName = sessionStorage.getItem("anon_name") || generateRandomName();
+    sessionStorage.setItem("anon_name", storedName);
+    setUsername(storedName);
 
-    socket.auth = { userID: storedID };
+    socket.auth = { username: storedName };
     socket.connect();
 
-    socket.on("online_users", users => setOnlineUsers(users.filter(u => u !== storedID)));
+    socket.on("online_users", users => setOnlineUsers(users.filter(u => u !== storedName)));
     socket.on("receive_private", data => {
       setPrivateMessages(prev => ({ ...prev, [data.from]: [...(prev[data.from]||[]), data] }));
       if (selectedUser !== data.from) setUnreadCounts(prev => ({ ...prev, [data.from]: (prev[data.from]||0)+1 }));
       scrollToBottom();
     });
     socket.on("live_message", msg => { setLiveMessages(prev => [...prev, msg]); scrollToBottom(); });
-
-    // Troll/warning message from server
     socket.on("warning", ({ message }) => {
       setLiveMessages(prev => [...prev, { userID: "SERVER", text: message, time: new Date().toLocaleTimeString() }]);
       scrollToBottom();
     });
 
     return () => {
-      socket.off("online_users"); socket.off("receive_private"); socket.off("live_message"); socket.off("warning");
+      socket.off("online_users").off("receive_private").off("live_message").off("warning");
     };
   }, [selectedUser]);
 
+  // Fetch initial live messages
   useEffect(() => {
-    fetch(`${SOCKET_URL}/live-messages`).then(res=>res.json()).then(data=>{ setLiveMessages(data); scrollToBottom(); });
+    fetch(`${SOCKET_URL}/live-messages`)
+      .then(res => res.json())
+      .then(data => { setLiveMessages(data); scrollToBottom(); });
   }, []);
 
   const sendPrivateMessage = () => {
     if (!text.trim() || !selectedUser) return;
-    const msg = { to: selectedUser, from: userID, text, time: new Date().toLocaleTimeString() };
+    const msg = { toName: selectedUser, text, time: new Date().toLocaleTimeString() };
     socket.emit("private_message", msg);
-    setPrivateMessages(prev => ({ ...prev, [selectedUser]: [...(prev[selectedUser]||[]), msg] }));
+    setPrivateMessages(prev => ({ ...prev, [selectedUser]: [...(prev[selectedUser]||[]), { from: username, text: msg.text, time: msg.time }] }));
     setText(""); scrollToBottom();
   };
 
   const sendLive = () => {
     if (!text.trim()) return;
-    const msg = { userID, text, time: new Date().toLocaleTimeString() };
+    const msg = { text, time: new Date().toLocaleTimeString() };
     socket.emit("live_message", msg); setText(""); scrollToBottom();
   };
 
@@ -86,8 +88,8 @@ export default function App() {
   };
 
   const MessageBubble = ({ m }) => (
-    <div style={{ display:"flex", justifyContent: m.from===userID?"flex-end":"flex-start", marginBottom:10 }}>
-      <div style={{ background: m.from===userID?"#4a90e2":"#333", padding:"10px 14px", borderRadius:16, maxWidth:"65%", lineHeight:1.4, wordBreak:"break-word", overflowWrap:"anywhere" }}>
+    <div style={{ display:"flex", justifyContent: m.from===username?"flex-end":"flex-start", marginBottom:10 }}>
+      <div style={{ background: m.from===username?"#4a90e2":"#333", padding:"10px 14px", borderRadius:16, maxWidth:"65%", lineHeight:1.4, wordBreak:"break-word", overflowWrap:"anywhere" }}>
         <div style={{ fontSize:12, opacity:0.8 }}>{m.from} • {m.time}</div>
         {m.text}
       </div>
@@ -106,11 +108,11 @@ export default function App() {
     <div style={{ display:"flex", height:"100vh", background:"#0f0f0f", color:"#fff", fontFamily:"Inter,sans-serif" }}>
       <div style={{ width:260, background:"#181818", borderRight:"1px solid #2a2a2a", display:"flex", flexDirection:"column", padding:16 }}>
         <h2 style={{ marginBottom:4 }}>O Hello Chat</h2>
-        <div style={{ opacity:0.7, marginBottom:20 }}>{userID}</div>
+        <div style={{ opacity:0.7, marginBottom:20 }}>{username}</div>
         <div onClick={()=>selectChat("LIVE")} style={{ padding:14, borderRadius:12, cursor:"pointer", background:selectedUser==="LIVE"?"#4a90e2":"#242424", marginBottom:12, textAlign:"center" }}>🕸️ Live Chat</div>
         <h4>Online Users</h4>
         <div style={{ marginTop:8, overflowY:"auto", flex:1 }}>
-          {onlineUsers.map(u=>(
+          {onlineUsers.map(u => (
             <div key={u} onClick={()=>selectChat(u)} style={{ padding:12, borderRadius:12, background:selectedUser===u?"#4a90e2":"#242424", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8 }}>
               <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                 <div style={{ width:34,height:34,borderRadius:"50%",background:avatarColor(u),display:"flex",alignItems:"center",justifyContent:"center",fontWeight:"bold",fontSize:16 }}>
@@ -126,11 +128,19 @@ export default function App() {
       <div style={{ flex:1, display:"flex", flexDirection:"column", padding:16 }}>
         <h2 style={{ marginBottom:16 }}>{selectedUser==="LIVE"?"🕸️ Live Chat":selectedUser?`Chat with ${selectedUser}`:"Select a chat"}</h2>
         <div style={{ flex:1, background:"#181818", border:"1px solid #2b2b2b", borderRadius:12, padding:16, overflowY:"auto" }}>
-          {selectedUser==="LIVE"?liveMessages.map((m,i)=><LiveBubble key={i} m={m}/>):(selectedUser && selectedUser!=="LIVE")&&(privateMessages[selectedUser]||[]).map((m,i)=><MessageBubble key={i} m={m}/>)}
+          {selectedUser==="LIVE"
+            ? liveMessages.map((m,i) => <LiveBubble key={i} m={m} />)
+            : (selectedUser && selectedUser!=="LIVE") && (privateMessages[selectedUser]||[]).map((m,i) => <MessageBubble key={i} m={m} />)}
           <div ref={chatEndRef}></div>
         </div>
         {selectedUser && <div style={{ display:"flex", marginTop:14 }}>
-          <input value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>e.key==="Enter"&&(selectedUser==="LIVE"?sendLive():sendPrivateMessage())} placeholder={selectedUser==="LIVE"?"Send a message to everyone...":"Type a private message..."} style={{ flex:1,padding:14,borderRadius:30,background:"#242424",border:"1px solid #333",color:"#fff",outline:"none" }}/>
+          <input
+            value={text}
+            onChange={e=>setText(e.target.value)}
+            onKeyDown={e=>e.key==="Enter"&&(selectedUser==="LIVE"?sendLive():sendPrivateMessage())}
+            placeholder={selectedUser==="LIVE"?"Send a message to everyone...":"Type a private message..."}
+            style={{ flex:1,padding:14,borderRadius:30,background:"#242424",border:"1px solid #333",color:"#fff",outline:"none" }}
+          />
           <button onClick={selectedUser==="LIVE"?sendLive:sendPrivateMessage} style={{ padding:"14px 20px", marginLeft:10, borderRadius:30, background:"#4a90e2", border:"none", color:"#fff", cursor:"pointer" }}>Send</button>
         </div>}
       </div>
