@@ -65,9 +65,7 @@ export default function App() {
     });
 
     socket.on("receive_private", data => {
-      // The chat key should be the OTHER person's username
-      // If I sent it, the other person is in selectedUser
-      // If they sent it, the other person is in data.from
+     
       let chatKey;
       if (data.from === usernameRef.current) {
         // I sent this message - store under the recipient's name
