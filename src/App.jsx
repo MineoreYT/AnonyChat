@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { io } from "socket.io-client";
 
-const SOCKET_URL = import.meta.env.VITE_SERVER_URL || "https://anonymous-chat-server-1q5h.onrender.com";
+const SOCKET_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:4000";
 const socket = io(SOCKET_URL, { path: "/socket.io", autoConnect: false });
 
 function avatarColor(id) {
@@ -23,8 +23,19 @@ export default function App() {
   const [text, setText] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showCopyNotification, setShowCopyNotification] = useState(false);
+  const [inCall, setInCall] = useState(false);
+  const [incomingCall, setIncomingCall] = useState(null);
+  const [callWith, setCallWith] = useState(null);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isVideoOff, setIsVideoOff] = useState(false);
+  const [remoteStreamActive, setRemoteStreamActive] = useState(false);
+  
   const chatEndRef = useRef(null);
   const usernameRef = useRef("");
+  const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
+  const peerConnectionRef = useRef(null);
+  const localStreamRef = useRef(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
 
   useEffect(() => {
@@ -39,6 +50,190 @@ export default function App() {
     setTimeout(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, 100);
   };
 
+  // WebRTC Configuration
+  const iceServers = {
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" }
+    ]
+  };
+
+  const createPeerConnection = (targetUser) => {
+    const pc = new RTCPeerConnection(iceServers);
+    
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        socket.emit("ice-candidate", {
+          to: targetUser || callWith,
+          candidate: event.candidate
+        });
+      }
+    };
+
+    pc.ontrack = (event) => {
+      console.log("Remote track received:", event);
+      if (remoteVideoRef.current && event.streams[0]) {
+        remoteVideoRef.current.srcObject = event.streams[0];
+        setRemoteStreamActive(true);
+      }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      console.log("ICE connection state:", pc.iceConnectionState);
+    };
+
+    return pc;
+  };
+
+  const startCall = async (targetUser, isVideo = true) => {
+    try {
+      setCallWith(targetUser);
+      
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: isVideo,
+        audio: true
+      });
+
+      localStreamRef.current = stream;
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+      }
+
+      // Start with camera OFF by default
+      if (isVideo) {
+        const videoTrack = stream.getVideoTracks()[0];
+        if (videoTrack) {
+          videoTrack.enabled = false;
+          setIsVideoOff(true);
+        }
+      } else {
+        setIsVideoOff(true);
+      }
+
+      const pc = createPeerConnection(targetUser);
+      peerConnectionRef.current = pc;
+
+      stream.getTracks().forEach(track => {
+        pc.addTrack(track, stream);
+      });
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      socket.emit("call-user", {
+        to: targetUser,
+        offer: offer,
+        isVideo: isVideo
+      });
+
+      setInCall(true);
+    } catch (error) {
+      console.error("Error starting call:", error);
+      alert("Could not access camera/microphone. Please check permissions.");
+      setCallWith(null);
+      setInCall(false);
+    }
+  };
+
+  const answerCall = async () => {
+    try {
+      setCallWith(incomingCall.from);
+      
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: incomingCall.isVideo,
+        audio: true
+      });
+
+      localStreamRef.current = stream;
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+      }
+
+      // Start with camera OFF by default
+      if (incomingCall.isVideo) {
+        const videoTrack = stream.getVideoTracks()[0];
+        if (videoTrack) {
+          videoTrack.enabled = false;
+          setIsVideoOff(true);
+        }
+      } else {
+        setIsVideoOff(true);
+      }
+
+      const pc = createPeerConnection(incomingCall.from);
+      peerConnectionRef.current = pc;
+
+      stream.getTracks().forEach(track => {
+        pc.addTrack(track, stream);
+      });
+
+      await pc.setRemoteDescription(new RTCSessionDescription(incomingCall.offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      socket.emit("answer-call", {
+        to: incomingCall.from,
+        answer: answer
+      });
+
+      setInCall(true);
+      setIncomingCall(null);
+    } catch (error) {
+      console.error("Error answering call:", error);
+      alert("Could not access camera/microphone. Please check permissions.");
+      setIncomingCall(null);
+    }
+  };
+
+  const endCall = () => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => track.stop());
+    }
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+    }
+    
+    socket.emit("end-call", { to: callWith });
+    
+    setInCall(false);
+    setCallWith(null);
+    setIsMuted(false);
+    setIsVideoOff(false);
+    setRemoteStreamActive(false);
+    localStreamRef.current = null;
+    peerConnectionRef.current = null;
+  };
+
+  const rejectCall = () => {
+    socket.emit("reject-call", { to: incomingCall.from });
+    setIncomingCall(null);
+  };
+
+  const toggleMute = () => {
+    if (localStreamRef.current) {
+      const audioTrack = localStreamRef.current.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.enabled = !audioTrack.enabled;
+        setIsMuted(!audioTrack.enabled);
+      }
+    }
+  };
+
+  const toggleVideo = () => {
+    if (localStreamRef.current) {
+      const videoTrack = localStreamRef.current.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.enabled = !videoTrack.enabled;
+        setIsVideoOff(!videoTrack.enabled);
+        console.log("Video toggled:", videoTrack.enabled ? "ON" : "OFF");
+      } else {
+        console.log("No video track found");
+      }
+    } else {
+      console.log("No local stream");
+    }
+  };
+
   useEffect(() => {
     socket.connect();
 
@@ -47,11 +242,9 @@ export default function App() {
       usernameRef.current = assignedName;
       setUserID(assignedID);
 
-      // Check if there's a target user in URL
       const params = new URLSearchParams(window.location.search);
       const targetUser = params.get('chat');
       if (targetUser && targetUser !== assignedName) {
-        // Wait a bit for online users to load, then select the target
         setTimeout(() => {
           setSelectedUser(targetUser);
           setSidebarOpen(false);
@@ -65,13 +258,10 @@ export default function App() {
     });
 
     socket.on("receive_private", data => {
-     
       let chatKey;
       if (data.from === usernameRef.current) {
-        // I sent this message - store under the recipient's name
         chatKey = selectedUser;
       } else {
-        // They sent this message - store under their name
         chatKey = data.from;
       }
       
@@ -82,7 +272,6 @@ export default function App() {
         }));
       }
       
-      // Only show unread count if it's from someone else and not currently viewing their chat
       if (data.from !== usernameRef.current && selectedUser !== data.from) {
         setUnreadCounts(prev => ({ 
           ...prev, 
@@ -106,12 +295,61 @@ export default function App() {
       scrollToBottom();
     });
 
+    // Call signaling
+    socket.on("incoming-call", ({ from, offer, isVideo }) => {
+      setIncomingCall({ from, offer, isVideo });
+    });
+
+    socket.on("call-answered", async ({ answer }) => {
+      if (peerConnectionRef.current) {
+        await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(answer));
+      }
+    });
+
+    socket.on("ice-candidate", async ({ candidate }) => {
+      if (peerConnectionRef.current) {
+        await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+      }
+    });
+
+    socket.on("call-ended", () => {
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+      if (peerConnectionRef.current) {
+        peerConnectionRef.current.close();
+      }
+      setInCall(false);
+      setCallWith(null);
+      setIsMuted(false);
+      setIsVideoOff(false);
+      setRemoteStreamActive(false);
+    });
+
+    socket.on("call-rejected", () => {
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+      if (peerConnectionRef.current) {
+        peerConnectionRef.current.close();
+      }
+      setInCall(false);
+      setCallWith(null);
+      setRemoteStreamActive(false);
+      alert("Call was rejected");
+    });
+
     return () => {
       socket.off("username_assigned");
       socket.off("online_users");
       socket.off("receive_private");
       socket.off("live_message");
       socket.off("warning");
+      socket.off("incoming-call");
+      socket.off("call-answered");
+      socket.off("ice-candidate");
+      socket.off("call-ended");
+      socket.off("call-rejected");
     };
   }, [selectedUser]);
 
@@ -222,6 +460,261 @@ export default function App() {
       overflow:"hidden",
       position:"relative"
     }}>
+      {/* Incoming Call Modal */}
+      {incomingCall && (
+        <div style={{
+          position:"fixed",
+          top:0,
+          left:0,
+          right:0,
+          bottom:0,
+          background:"rgba(0,0,0,0.85)",
+          display:"flex",
+          alignItems:"center",
+          justifyContent:"center",
+          zIndex:1001
+        }}>
+          <div style={{
+            background:"#242424",
+            padding:30,
+            borderRadius:16,
+            textAlign:"center",
+            maxWidth:400
+          }}>
+            <div style={{ fontSize:48, marginBottom:16 }}>📞</div>
+            <h2 style={{ margin:"0 0 8px 0" }}>Incoming Call</h2>
+            <p style={{ opacity:0.8, marginBottom:24 }}>
+              {incomingCall.from} is calling you
+              {incomingCall.isVideo ? " (video)" : " (audio)"}
+            </p>
+            <div style={{ display:"flex", gap:12, justifyContent:"center" }}>
+              <button
+                onClick={answerCall}
+                style={{
+                  background:"#34c759",
+                  border:"none",
+                  color:"#fff",
+                  padding:"12px 24px",
+                  borderRadius:24,
+                  cursor:"pointer",
+                  fontSize:16,
+                  fontWeight:"500"
+                }}
+              >
+                ✓ Answer
+              </button>
+              <button
+                onClick={rejectCall}
+                style={{
+                  background:"#ff3b30",
+                  border:"none",
+                  color:"#fff",
+                  padding:"12px 24px",
+                  borderRadius:24,
+                  cursor:"pointer",
+                  fontSize:16,
+                  fontWeight:"500"
+                }}
+              >
+                ✕ Decline
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Active Call Screen */}
+      {inCall && (
+        <div style={{
+          position:"fixed",
+          top:0,
+          left:0,
+          right:0,
+          bottom:0,
+          background:"#1a1a1a",
+          zIndex:1000,
+          display:"flex",
+          flexDirection:"column"
+        }}>
+          <div style={{ flex:1, position:"relative", display:"flex", alignItems:"center", justifyContent:"center", background:"#1a1a1a" }}>
+            {/* Remote video or placeholder */}
+            <div style={{ position:"relative", width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center" }}>
+              <video
+                ref={remoteVideoRef}
+                autoPlay
+                playsInline
+                style={{
+                  width:"100%",
+                  height:"100%",
+                  objectFit:"cover"
+                }}
+                onLoadedMetadata={() => console.log("Remote video loaded")}
+              />
+              {/* Placeholder overlay when no video stream */}
+              <div style={{
+                position:"absolute",
+                top:0,
+                left:0,
+                right:0,
+                bottom:0,
+                display:"flex",
+                flexDirection:"column",
+                alignItems:"center",
+                justifyContent:"center",
+                pointerEvents:"none",
+                opacity: remoteStreamActive ? 0 : 1,
+                transition:"opacity 0.3s"
+              }}>
+                <div style={{
+                  width:120,
+                  height:120,
+                  borderRadius:"50%",
+                  background:avatarColor(callWith || ""),
+                  display:"flex",
+                  alignItems:"center",
+                  justifyContent:"center",
+                  fontSize:48,
+                  fontWeight:"bold"
+                }}>
+                  {avatarLetter(callWith || "")}
+                </div>
+                <div style={{ fontSize:24, fontWeight:"500", marginTop:16 }}>{callWith}</div>
+                <div style={{ opacity:0.6, fontSize:14, marginTop:8 }}>Connecting...</div>
+              </div>
+            </div>
+
+            {/* Local video or placeholder */}
+            <div style={{
+              position:"absolute",
+              bottom:20,
+              right:20,
+              width:isMobile ? 120 : 200,
+              height:isMobile ? 160 : 267,
+              borderRadius:12,
+              overflow:"hidden",
+              border:"2px solid #fff",
+              background:"#2a2a2a",
+              position:"relative"
+            }}>
+              <video
+                ref={localVideoRef}
+                autoPlay
+                playsInline
+                muted
+                style={{
+                  width:"100%",
+                  height:"100%",
+                  objectFit:"cover",
+                  position:"absolute",
+                  top:0,
+                  left:0
+                }}
+              />
+              {/* Placeholder overlay when camera is off */}
+              {isVideoOff && (
+                <div style={{
+                  position:"absolute",
+                  top:0,
+                  left:0,
+                  width:"100%",
+                  height:"100%",
+                  display:"flex",
+                  flexDirection:"column",
+                  alignItems:"center",
+                  justifyContent:"center",
+                  background:"linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 100%)",
+                  zIndex:1
+                }}>
+                  <div style={{
+                    width:60,
+                    height:60,
+                    borderRadius:"50%",
+                    background:avatarColor(username),
+                    display:"flex",
+                    alignItems:"center",
+                    justifyContent:"center",
+                    fontSize:24,
+                    fontWeight:"bold",
+                    marginBottom:8
+                  }}>
+                    {avatarLetter(username)}
+                  </div>
+                  <div style={{ fontSize:12, opacity:0.7 }}>Camera Off</div>
+                </div>
+              )}
+            </div>
+
+            <div style={{
+              position:"absolute",
+              top:20,
+              left:20,
+              background:"rgba(0,0,0,0.6)",
+              padding:"8px 16px",
+              borderRadius:8,
+              fontSize:14
+            }}>
+              In call with {callWith}
+            </div>
+          </div>
+          <div style={{
+            padding:20,
+            background:"rgba(0,0,0,0.8)",
+            display:"flex",
+            gap:16,
+            justifyContent:"center"
+          }}>
+            <button
+              onClick={toggleMute}
+              style={{
+                background: isMuted ? "#ff3b30" : "#333",
+                border:"none",
+                color:"#fff",
+                padding:16,
+                borderRadius:"50%",
+                cursor:"pointer",
+                fontSize:20,
+                width:56,
+                height:56
+              }}
+            >
+              {isMuted ? "🔇" : "🎤"}
+            </button>
+            <button
+              onClick={toggleVideo}
+              style={{
+                background: isVideoOff ? "#ff3b30" : "#333",
+                border:"none",
+                color:"#fff",
+                padding:16,
+                borderRadius:"50%",
+                cursor:"pointer",
+                fontSize:20,
+                width:56,
+                height:56
+              }}
+            >
+              {isVideoOff ? "📹" : "📷"}
+            </button>
+            <button
+              onClick={endCall}
+              style={{
+                background:"#ff3b30",
+                border:"none",
+                color:"#fff",
+                padding:16,
+                borderRadius:"50%",
+                cursor:"pointer",
+                fontSize:20,
+                width:56,
+                height:56
+              }}
+            >
+              📞
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Copy Notification */}
       {showCopyNotification && (
         <div style={{
@@ -232,8 +725,7 @@ export default function App() {
           padding:"12px 20px",
           borderRadius:8,
           zIndex:1000,
-          boxShadow:"0 4px 12px rgba(0,0,0,0.3)",
-          animation:"slideIn 0.3s ease"
+          boxShadow:"0 4px 12px rgba(0,0,0,0.3)"
         }}>
           ✓ Link copied to clipboard!
         </div>
@@ -291,7 +783,6 @@ export default function App() {
           )}
         </div>
         
-        {/* User info with share button */}
         <div style={{ 
           display:"flex", 
           alignItems:"center", 
@@ -456,22 +947,54 @@ export default function App() {
                 :"Select a chat"}
           </h2>
           {selectedUser && selectedUser !== "LIVE" && (
-            <button
-              onClick={(e) => copyUserLink(e, selectedUser)}
-              title="Copy chat link with this user"
-              style={{
-                background:"#4a90e2",
-                border:"none",
-                color:"#fff",
-                padding:"8px 16px",
-                borderRadius:8,
-                cursor:"pointer",
-                fontSize:13,
-                fontWeight:"500"
-              }}
-            >
-              🔗 Share Chat
-            </button>
+            <div style={{ display:"flex", gap:8 }}>
+              <button
+                onClick={() => startCall(selectedUser, false)}
+                title="Audio call"
+                style={{
+                  background:"#34c759",
+                  border:"none",
+                  color:"#fff",
+                  padding:"8px 12px",
+                  borderRadius:8,
+                  cursor:"pointer",
+                  fontSize:18
+                }}
+              >
+                📞
+              </button>
+              <button
+                onClick={() => startCall(selectedUser, true)}
+                title="Video call"
+                style={{
+                  background:"#4a90e2",
+                  border:"none",
+                  color:"#fff",
+                  padding:"8px 12px",
+                  borderRadius:8,
+                  cursor:"pointer",
+                  fontSize:18
+                }}
+              >
+                📹
+              </button>
+              <button
+                onClick={(e) => copyUserLink(e, selectedUser)}
+                title="Copy chat link"
+                style={{
+                  background:"#4a90e2",
+                  border:"none",
+                  color:"#fff",
+                  padding:"8px 16px",
+                  borderRadius:8,
+                  cursor:"pointer",
+                  fontSize:13,
+                  fontWeight:"500"
+                }}
+              >
+                🔗 Share
+              </button>
+            </div>
           )}
         </div>
 
