@@ -89,17 +89,30 @@ export default function App() {
     try {
       setCallWith(targetUser);
       
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: isVideo,
-        audio: true
-      });
+      // Request permissions with more specific constraints
+      const constraints = {
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        },
+        video: isVideo ? {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          facingMode: "user"
+        } : false
+      };
+
+      console.log("Requesting media with constraints:", constraints);
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      console.log("Media stream obtained:", stream.getTracks().map(t => ({ kind: t.kind, enabled: t.enabled })));
 
       localStreamRef.current = stream;
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
       }
 
-      // Start with camera OFF by default
+      // Start with camera OFF by default (but keep audio ON)
       if (isVideo) {
         const videoTrack = stream.getVideoTracks()[0];
         if (videoTrack) {
@@ -129,7 +142,19 @@ export default function App() {
       setInCall(true);
     } catch (error) {
       console.error("Error starting call:", error);
-      alert("Could not access camera/microphone. Please check permissions.");
+      let errorMessage = "Could not access camera/microphone. ";
+      
+      if (error.name === "NotAllowedError" || error.name === "PermissionDeniedError") {
+        errorMessage += "Please allow microphone/camera access in your browser settings.";
+      } else if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError") {
+        errorMessage += "No microphone or camera found on your device.";
+      } else if (error.name === "NotReadableError" || error.name === "TrackStartError") {
+        errorMessage += "Your camera/microphone is already in use by another application.";
+      } else {
+        errorMessage += "Error: " + error.message;
+      }
+      
+      alert(errorMessage);
       setCallWith(null);
       setInCall(false);
     }
@@ -139,17 +164,30 @@ export default function App() {
     try {
       setCallWith(incomingCall.from);
       
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: incomingCall.isVideo,
-        audio: true
-      });
+      // Request permissions with more specific constraints
+      const constraints = {
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        },
+        video: incomingCall.isVideo ? {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          facingMode: "user"
+        } : false
+      };
+
+      console.log("Requesting media for answer with constraints:", constraints);
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      console.log("Media stream obtained for answer:", stream.getTracks().map(t => ({ kind: t.kind, enabled: t.enabled })));
 
       localStreamRef.current = stream;
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
       }
 
-      // Start with camera OFF by default
+      // Start with camera OFF by default (but keep audio ON)
       if (incomingCall.isVideo) {
         const videoTrack = stream.getVideoTracks()[0];
         if (videoTrack) {
@@ -180,7 +218,19 @@ export default function App() {
       setIncomingCall(null);
     } catch (error) {
       console.error("Error answering call:", error);
-      alert("Could not access camera/microphone. Please check permissions.");
+      let errorMessage = "Could not access camera/microphone. ";
+      
+      if (error.name === "NotAllowedError" || error.name === "PermissionDeniedError") {
+        errorMessage += "Please allow microphone/camera access in your browser settings.";
+      } else if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError") {
+        errorMessage += "No microphone or camera found on your device.";
+      } else if (error.name === "NotReadableError" || error.name === "TrackStartError") {
+        errorMessage += "Your camera/microphone is already in use by another application.";
+      } else {
+        errorMessage += "Error: " + error.message;
+      }
+      
+      alert(errorMessage);
       setIncomingCall(null);
     }
   };
@@ -593,8 +643,7 @@ export default function App() {
               borderRadius:12,
               overflow:"hidden",
               border:"2px solid #fff",
-              background:"#2a2a2a",
-              position:"relative"
+              background:"#2a2a2a"
             }}>
               <video
                 ref={localVideoRef}
