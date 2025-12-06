@@ -643,6 +643,7 @@ export default function App() {
                 ref={remoteVideoRef}
                 autoPlay
                 playsInline
+                volume={1.0}
                 style={{
                   width:"100%",
                   height:"100%",
@@ -651,6 +652,8 @@ export default function App() {
                 onLoadedMetadata={() => {
                   console.log("Remote video loaded");
                   if (remoteVideoRef.current) {
+                    remoteVideoRef.current.volume = 1.0;
+                    remoteVideoRef.current.muted = false;
                     remoteVideoRef.current.play().catch(e => console.log("Play error:", e));
                   }
                 }}
