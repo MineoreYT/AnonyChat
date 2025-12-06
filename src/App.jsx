@@ -241,22 +241,35 @@ export default function App() {
   };
 
   const endCall = () => {
+    console.log("Ending call...");
+    
+    // Stop all local tracks
     if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => track.stop());
+      localStreamRef.current.getTracks().forEach(track => {
+        track.stop();
+        console.log(`Stopped ${track.kind} track`);
+      });
+      localStreamRef.current = null;
     }
+    
+    // Close peer connection
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
+      console.log("Peer connection closed");
+      peerConnectionRef.current = null;
     }
     
-    socket.emit("end-call", { to: callWith });
+    // Notify the other user
+    if (callWith) {
+      socket.emit("end-call", { to: callWith });
+    }
     
+    // Reset all states
     setInCall(false);
     setCallWith(null);
     setIsMuted(false);
     setIsVideoOff(false);
     setRemoteStreamActive(false);
-    localStreamRef.current = null;
-    peerConnectionRef.current = null;
   };
 
   const rejectCall = () => {
@@ -356,24 +369,46 @@ export default function App() {
     });
 
     socket.on("call-answered", async ({ answer }) => {
-      if (peerConnectionRef.current) {
-        await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(answer));
+      if (peerConnectionRef.current && peerConnectionRef.current.signalingState !== "closed") {
+        try {
+          await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(answer));
+          console.log("Answer set successfully");
+        } catch (error) {
+          console.error("Error setting remote description:", error);
+        }
       }
     });
 
     socket.on("ice-candidate", async ({ candidate }) => {
-      if (peerConnectionRef.current) {
-        await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+      if (peerConnectionRef.current && peerConnectionRef.current.signalingState !== "closed") {
+        try {
+          await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+          console.log("ICE candidate added successfully");
+        } catch (error) {
+          console.error("Error adding ICE candidate:", error);
+        }
+      } else {
+        console.log("Ignoring ICE candidate - connection closed or not ready");
       }
     });
 
     socket.on("call-ended", () => {
+      console.log("Call ended by remote user");
+      
       if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(track => track.stop());
+        localStreamRef.current.getTracks().forEach(track => {
+          track.stop();
+          console.log(`Stopped ${track.kind} track`);
+        });
+        localStreamRef.current = null;
       }
+      
       if (peerConnectionRef.current) {
         peerConnectionRef.current.close();
+        console.log("Peer connection closed");
+        peerConnectionRef.current = null;
       }
+      
       setInCall(false);
       setCallWith(null);
       setIsMuted(false);
@@ -382,12 +417,22 @@ export default function App() {
     });
 
     socket.on("call-rejected", () => {
+      console.log("Call was rejected by remote user");
+      
       if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(track => track.stop());
+        localStreamRef.current.getTracks().forEach(track => {
+          track.stop();
+          console.log(`Stopped ${track.kind} track`);
+        });
+        localStreamRef.current = null;
       }
+      
       if (peerConnectionRef.current) {
         peerConnectionRef.current.close();
+        console.log("Peer connection closed");
+        peerConnectionRef.current = null;
       }
+      
       setInCall(false);
       setCallWith(null);
       setRemoteStreamActive(false);
