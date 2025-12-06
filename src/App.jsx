@@ -75,6 +75,11 @@ export default function App() {
       if (remoteVideoRef.current && event.streams[0]) {
         remoteVideoRef.current.srcObject = event.streams[0];
         setRemoteStreamActive(true);
+        
+        // Ensure audio plays
+        remoteVideoRef.current.play().catch(err => {
+          console.log("Error playing remote stream:", err);
+        });
       }
     };
 
@@ -598,7 +603,12 @@ export default function App() {
                   height:"100%",
                   objectFit:"cover"
                 }}
-                onLoadedMetadata={() => console.log("Remote video loaded")}
+                onLoadedMetadata={() => {
+                  console.log("Remote video loaded");
+                  if (remoteVideoRef.current) {
+                    remoteVideoRef.current.play().catch(e => console.log("Play error:", e));
+                  }
+                }}
               />
               {/* Placeholder overlay when no video stream */}
               <div style={{
